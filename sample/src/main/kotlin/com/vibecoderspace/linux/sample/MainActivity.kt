@@ -32,17 +32,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vibecoderspace.linux.DefaultProfiles
 import com.vibecoderspace.linux.InstallProgress
-import com.vibecoderspace.linux.LinuxCommandBuilder
-import com.vibecoderspace.linux.LinuxProcess
-import com.vibecoderspace.linux.LinuxProcessSpec
 import com.vibecoderspace.linux.LinuxRuntime
 import com.vibecoderspace.linux.LinuxRuntimeOptions
 import com.vibecoderspace.linux.ProotBinaries
 import com.vibecoderspace.linux.RootfsImage
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -74,27 +69,22 @@ private fun SampleScreen() {
         }
     }
 
+    var image by remember { mutableStateOf(runtime?.installedImage()) }
     val status = remember {
         MutableStateFlow(
-            if (binaries == null) {
-                "PRoot binaries not found. Add libproot.so and libloader.so to the app's jniLibs."
-            } else {
-                "Ready"
+            when {
+                binaries == null ->
+                    "PRoot binaries not found. Add libproot.so and libloader.so to jniLibs."
+                image != null -> "Installed ${image?.profile?.displayName}"
+                else -> "No image installed"
             },
         )
     }
     val statusText by status.collectAsState()
-    val log = remember { MutableStateFlow("") }
-    val logText by log.collectAsState()
-    val running = remember { MutableStateFlow<LinuxProcess?>(null) }
-    val runningProcess by running.collectAsState()
-
-    var image by remember { mutableStateOf<RootfsImage?>(null) }
 
     fun install() {
         val rt = runtime ?: return
         scope.launch {
-            status.value = "Starting install"
             try {
                 val installed = rt.ensureInstalled(DefaultProfiles.ubuntu) { progress ->
                     status.value = describe(progress)
@@ -107,66 +97,31 @@ private fun SampleScreen() {
         }
     }
 
-    fun run(command: List<String>) {
+    fun repair() {
         val rt = runtime ?: return
-        val installed = image
-        if (installed == null) {
-            status.value = "Install an image first"
-            return
-        }
-
+        val current = image ?: return
         scope.launch {
-            val label = command.joinToString(" ")
-            status.value = "Running $label"
             try {
-                val process = withContext(Dispatchers.IO) {
-                    rt.launch(installed, LinuxProcessSpec(command = command))
+                val repaired = rt.repair(current) { progress ->
+                    status.value = describe(progress)
                 }
-                running.value = process
-
-                val output = withContext(Dispatchers.IO) {
-                    process.output.bufferedReader().use { it.readText() }
-                }
-                val exitCode = withContext(Dispatchers.IO) { process.awaitExit() }
-
-                log.value += "\n$ $label\n$output\n[exit $exitCode]"
-                status.value = "Ready"
+                image = repaired
+                status.value = "Repaired ${repaired.profile.displayName}"
             } catch (error: Exception) {
-                log.value += "\n$ $label\nERROR: ${error.message}"
-                status.value = "Failed"
-            } finally {
-                running.value = null
+                status.value = "Repair failed: ${error.message}"
             }
         }
     }
 
-    fun stop() {
-        running.value?.stop()
-        running.value = null
-        status.value = "Stopped"
-    }
-
-    fun runOneShot(command: List<String>) {
+    fun uninstall() {
         val rt = runtime ?: return
-        val installed = image
-        if (installed == null) {
-            status.value = "Install an image first"
-            return
-        }
-
         scope.launch {
-            val label = command.joinToString(" ")
-            status.value = "Running $label"
             try {
-                val result = rt.run(
-                    installed,
-                    LinuxCommandBuilder.of(*command.toTypedArray()),
-                )
-                log.value += "\n$ $label\n${result.output}\n[exit ${result.exitCode}]"
-                status.value = if (result.isSuccess) "Ready" else "Failed"
+                rt.uninstall(deleteHome = true)
+                image = null
+                status.value = "Uninstalled"
             } catch (error: Exception) {
-                log.value += "\n$ $label\nERROR: ${error.message}"
-                status.value = "Failed"
+                status.value = "Uninstall failed: ${error.message}"
             }
         }
     }
@@ -182,7 +137,7 @@ private fun SampleScreen() {
             style = MaterialTheme.typography.headlineMedium,
         )
         Text(
-            text = "PRoot runtime with host-supplied binaries.",
+            text = "Root filesystem provisioning with host-supplied PRoot binaries.",
             style = MaterialTheme.typography.bodyMedium,
         )
 
@@ -197,57 +152,42 @@ private fun SampleScreen() {
             ) {
                 Text("Install Ubuntu")
             }
-        }
-
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(
-                onClick = { run(listOf("uname", "-a")) },
-                enabled = image != null && runningProcess == null,
+                onClick = { repair() },
+                enabled = image != null,
             ) {
-                Text("uname -a")
+                Text("Repair")
             }
             OutlinedButton(
-                onClick = { run(listOf("id")) },
-                enabled = image != null && runningProcess == null,
+                onClick = { uninstall() },
+                enabled = image != null,
             ) {
-                Text("id")
+                Text("Uninstall")
             }
-            OutlinedButton(
-                onClick = { run(listOf("/bin/sh", "-c", "echo \$PATH")) },
-                enabled = image != null && runningProcess == null,
-            ) {
-                Text("PATH")
-            }
-            OutlinedButton(
-                onClick = { runOneShot(listOf("uname", "-a")) },
-                enabled = image != null && runningProcess == null,
-            ) {
-                Text("uname (run)")
-            }
-        }
-
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(
-            onClick = { stop() },
-            enabled = runningProcess != null,
-        ) {
-            Text("Stop")
         }
 
         Spacer(Modifier.height(20.dp))
         Text(
-            text = "Output",
+            text = "Image",
             style = MaterialTheme.typography.titleMedium,
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            text = logText.ifBlank { "No output yet." },
+            text = image?.let { describeImage(it) } ?: "No image installed.",
             modifier = Modifier.fillMaxWidth(),
             fontFamily = FontFamily.Monospace,
             fontSize = 12.sp,
         )
     }
+}
+
+private fun describeImage(image: RootfsImage): String = buildString {
+    appendLine("profile:   ${image.profile.displayName} (${image.profile.id})")
+    appendLine("rootfs:    ${image.rootfsDir.absolutePath}")
+    appendLine("sandbox:   ${image.layout.sandboxDir.absolutePath}")
+    appendLine("home:      ${image.layout.homeDir.absolutePath}")
+    appendLine("init:      ${image.layout.initScript.absolutePath}")
+    appendLine("installed: ${image.installedAt}")
 }
 
 private fun describe(progress: InstallProgress): String = when (progress.stage) {

@@ -27,7 +27,7 @@ data class InstallProgress(
         /** Writing hostname, DNS, groups, and the init script. */
         CONFIGURING,
 
-        /** Marker committed; the image can be launched. */
+        /** Marker committed; the image is ready for the host app. */
         READY,
     }
 }

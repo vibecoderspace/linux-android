@@ -15,14 +15,14 @@ data class RootfsContext(
 /**
  * Describes one Linux distribution.
  *
- * Profiles hold the distro-specific parts of the runtime: the archive source,
+ * Profiles hold the distro-specific parts of provisioning: the archive source,
  * the login shell, the guest PATH and locale, the init script, and any files
- * that must be written after extraction. PRoot argv construction and process
- * launching stay generic and never inspect the profile.
+ * that must be written after extraction. The library only writes these into the
+ * image; the host app reads them when it builds its PRoot argv.
  */
 interface RootfsProfile {
 
-    /** Stable identifier, also used as the image directory name. */
+    /** Stable identifier recorded in the install metadata. */
     val id: String
 
     val displayName: String
@@ -50,13 +50,13 @@ interface RootfsProfile {
      */
     val configVersion: Int get() = 1
 
-    /** Arguments appended to [shell] for an interactive login shell. */
+    /** Arguments the host app can append to [shell] for an interactive login shell. */
     fun shellArguments(layout: RootfsLayout): List<String>
 
     /** Contents of the init script written to `<image>/bin/init`. */
     fun initScript(): String
 
-    /** Guest-level environment for processes started in this image. */
+    /** Guest-level environment the host app can use for this image. */
     fun environment(layout: RootfsLayout): Map<String, String>
 
     /** Writes distro-specific files after extraction. */

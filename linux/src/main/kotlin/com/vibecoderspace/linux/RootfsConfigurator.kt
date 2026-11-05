@@ -6,7 +6,6 @@ import java.io.File
 import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
-import java.util.HashSet
 
 /** Writes the files shared by Debian-style images. */
 internal object RootfsConfigurator {
@@ -17,25 +16,14 @@ internal object RootfsConfigurator {
         val sandbox = context.layout.sandboxDir
         val etc = ensureDir(File(sandbox, "etc"))
 
-        writeFile(File(etc, "hostname"), context.hostname + "\n")
+        writeFile(File(etc, "hostname"), RootfsFiles.hostname(context.hostname))
         writeFile(
             File(etc, "resolv.conf"),
-            context.dnsServers.joinToString(separator = "\n", postfix = "\n") {
-                "nameserver $it"
-            },
+            RootfsFiles.resolvConf(context.dnsServers),
         )
         writeFile(
             File(etc, "hosts"),
-            "127.0.0.1   localhost.localdomain localhost\n" +
-                "127.0.1.1   ${context.hostname}\n" +
-                "\n" +
-                "# IPv6.\n" +
-                "::1         localhost.localdomain localhost ip6-localhost ip6-loopback\n" +
-                "fe00::0     ip6-localnet\n" +
-                "ff00::0     ip6-mcastprefix\n" +
-                "ff02::1     ip6-allnodes\n" +
-                "ff02::2     ip6-allrouters\n" +
-                "ff02::3     ip6-allhosts\n",
+            RootfsFiles.hosts(context.hostname),
         )
 
         appendAndroidGroups(File(etc, "group"))
@@ -51,17 +39,7 @@ internal object RootfsConfigurator {
 
     private fun appendAndroidGroups(groupFile: File) {
         val gid = runCatching { Os.getgid() }.getOrDefault(0).toLong()
-
-        val additions = arrayOf(
-            "inet:x:3003",
-            "everybody:x:9997",
-            "android_app:x:20455",
-            "android_debug:x:50455",
-            "android_cache:x:" + (10000L + gid),
-            "android_storage:x:" + (40000L + gid),
-            "android_media:x:" + (50000L + gid),
-            "android_external_storage:x:1077",
-        )
+        val additions = RootfsFiles.androidGroupAdditions(gid)
 
         val existing = if (groupFile.isFile) {
             runCatching { groupFile.readText(StandardCharsets.UTF_8) }.getOrDefault("")
@@ -69,25 +47,8 @@ internal object RootfsConfigurator {
             ""
         }
 
-        val knownGids = HashSet<String>()
-        for (line in existing.split("\n")) {
-            val separator = line.lastIndexOf(':')
-            if (separator >= 0) {
-                knownGids.add(line.substring(separator + 1).trim())
-            }
-        }
-
-        val result = StringBuilder(existing)
-        if (result.isNotEmpty() && result.last() != '\n') {
-            result.append('\n')
-        }
-        for (addition in additions) {
-            val value = addition.substring(addition.lastIndexOf(':') + 1)
-            if (knownGids.add(value)) {
-                result.append(addition).append('\n')
-            }
-        }
-        runCatching { writeFile(groupFile, result.toString()) }
+        val merged = RootfsFiles.mergeGroups(existing, additions)
+        runCatching { writeFile(groupFile, merged) }
             .onFailure { Log.w(TAG, "Could not update ${groupFile.absolutePath}", it) }
     }
 

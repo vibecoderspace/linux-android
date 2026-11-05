@@ -2,7 +2,7 @@ package com.vibecoderspace.linux
 
 import java.io.File
 
-/** An installed root filesystem that processes can be launched in. */
+/** An installed root filesystem that the host app can use. */
 data class RootfsImage(
     val profile: RootfsProfile,
     val layout: RootfsLayout,
