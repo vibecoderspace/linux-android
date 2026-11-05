@@ -10,14 +10,15 @@ and TUIs, which are out of scope for this library.
 ## Features
 
 - Launch any guest command as a normal Android process.
-- Install root filesystems on demand, with progress reporting.
-- Keep several distributions installed side by side.
+- Install one root filesystem on demand, with progress reporting.
+- Replace the image when the profile or archive changes; keep user data.
+- Fluent command builder, one-shot `run()`, and a `plan()` for PTY runners.
 - Distro behavior lives in a profile, not in the launch code.
 - Host-supplied PRoot binaries, so the library stays Apache-2.0.
 
 ## Status
 
-`0.1.1` — usable, API may still change.
+`0.2.0` — usable, API may still change.
 
 ## Installation
 
@@ -29,7 +30,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.vibecoderspace:linux-android:v0.1.1")
+    implementation("com.github.vibecoderspace:linux-android:v0.2.0")
 }
 ```
 
@@ -82,10 +83,11 @@ val runtime = LinuxRuntime.proot(
     options = LinuxRuntimeOptions(hostname = "myapp"),
 )
 
-// Install Ubuntu 24.04 on first use.
-val image = runtime.ensureInstalled(DefaultProfiles.ubuntu) { progress ->
-    // progress.stage / progress.fraction
-}
+// Reuse the installed image or install Ubuntu 24.04 on first use.
+val image = runtime.installedImage()
+    ?: runtime.ensureInstalled(DefaultProfiles.ubuntu) { progress ->
+        // progress.stage / progress.fraction / progress.message
+    }
 
 // Run a guest process.
 val process = runtime.launch(
@@ -114,24 +116,111 @@ val server = runtime.launch(
 server.stop()
 ```
 
+### Commands
+
+`LinuxCommandBuilder` describes a guest command once and can be reused:
+
+```kotlin
+val base = LinuxCommandBuilder
+    .of("/usr/bin/apt-get")
+    .workingDirectory("/home")
+
+// One-shot: capture output, exit code, and timeout.
+val update = runtime.run(image, base.argument("update"))
+if (!update.isSuccess) error(update.output)
+
+// Long-running: the caller owns the process.
+val server = runtime.command(
+    image,
+    LinuxCommandBuilder
+        .of("/home/.opencode/bin/opencode", "serve", "--port", "4097")
+        .logTo(File(context.cacheDir, "opencode.log")),
+)
+```
+
+`run()` kills the process after `timeout` (10 minutes by default), caps output
+at 256 KB, and returns:
+
+```kotlin
+CommandResult(
+    exitCode = 0,
+    output = "...",
+    truncated = false,
+    timedOut = false,
+)
+```
+
+A non-zero exit code is returned, not thrown.
+
+### PTY sessions
+
+`plan()` resolves a spec into the exact PRoot invocation. Use it when a terminal
+emulator owns the process:
+
+```kotlin
+val plan = runtime.plan(image, runtime.shellSpec(image))
+
+val session = TerminalSession(
+    plan.executable,                              // libproot.so
+    plan.workingDirectory.absolutePath,           // host cwd
+    plan.arguments.toTypedArray(),                // full argv
+    plan.environment.map { "${it.key}=${it.value}" }.toTypedArray(),
+    transcriptRows,
+    client,
+)
+```
+
+The same plan drives `command()` and `run()`, so PTY tabs and headless jobs use
+identical PRoot flags, binds, and environment.
+
 An interactive shell is available when the host app also provides a terminal:
 
 ```kotlin
 val shell = runtime.launchShell(image)
 ```
 
-### Hostname
+### Hostname and DNS
 
-The guest hostname is a runtime option, not a distro detail. It is written to
-`/etc/hostname` and `/etc/hosts` (as `127.0.1.1`) when an image is installed or
-re-configured:
+The guest hostname and DNS servers are runtime options, not distro details.
+They are written to `/etc/hostname`, `/etc/hosts`, and `/etc/resolv.conf` when an
+image is installed or re-configured:
 
 ```kotlin
-LinuxRuntimeOptions(hostname = "myapp") // default: "localhost"
+LinuxRuntimeOptions(
+    hostname = "myapp",                  // default: "localhost"
+    dnsServers = listOf("1.1.1.1"),      // default: 1.1.1.1, 8.8.8.8
+)
 ```
 
 Existing images are re-configured in place on the next `ensureInstalled` call,
-so changing the hostname does not trigger a download.
+so changing either option does not trigger a download.
+
+### One image at a time
+
+There is exactly one installed image. Installing a different profile replaces
+the current one:
+
+```kotlin
+// Ubuntu -> Debian: sandbox, init script and metadata are replaced.
+val image = runtime.ensureInstalled(DefaultProfiles.debian, keepHome = true)
+```
+
+`keepHome = true` (the default) preserves `/home` and `/root`. Pass `false` to
+reset user data as well.
+
+Recovery and removal:
+
+```kotlin
+// Reinstall the same profile without touching home/.
+val repaired = runtime.repair(image)
+
+// Remove the image. Cached archives stay in the cache directory.
+runtime.uninstall(deleteHome = true)
+```
+
+Installation is serialized: concurrent `ensureInstalled` calls run one at a
+time. A failed install never writes the `.installed` marker, so the next call
+retries cleanly. A corrupt cached archive is deleted and downloaded again.
 
 ## Profiles
 
@@ -164,21 +253,19 @@ class MyProfile : RootfsProfile {
 ```text
 <private>/local/
   rootfs/
-    ubuntu-24.04/
-      sandbox/        extracted root filesystem
-      home/           bind-mounted at /home and /root
-      bin/init        profile init script
-      stat, vmstat    PRoot /proc overrides
-      meta.properties
-      .installed
-    debian-12/
-      ...
+    sandbox/          extracted root filesystem        (-r target)
+    home/             bind-mounted at /home and /root  (kept on replace)
+    bin/init          profile init script
+    stat, vmstat      PRoot /proc overrides
+    meta.properties   schema, profile, source, checksum, config version
+    .installed        commit marker, written last
+    .install.lock     install serialization
+    .failed           last failure, if any
 ```
 
-A legacy single-image install at `<private>/local/sandbox` is adopted in place
-for the Ubuntu profile on first use. If a profile's archive URL changes later,
-the next `ensureInstalled` call detects the mismatch in `meta.properties` and
-reinstalls that image instead of silently keeping the stale one.
+There is no per-profile directory and no legacy location. If the profile or its
+archive URL changes, the next `ensureInstalled` call replaces `sandbox/` in
+place and leaves `home/` alone.
 
 ## Play Store note
 

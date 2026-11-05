@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.vibecoderspace.linux.DefaultProfiles
 import com.vibecoderspace.linux.InstallProgress
+import com.vibecoderspace.linux.LinuxCommandBuilder
 import com.vibecoderspace.linux.LinuxProcess
 import com.vibecoderspace.linux.LinuxProcessSpec
 import com.vibecoderspace.linux.LinuxRuntime
@@ -145,6 +146,31 @@ private fun SampleScreen() {
         status.value = "Stopped"
     }
 
+    fun runOneShot(command: List<String>) {
+        val rt = runtime ?: return
+        val installed = image
+        if (installed == null) {
+            status.value = "Install an image first"
+            return
+        }
+
+        scope.launch {
+            val label = command.joinToString(" ")
+            status.value = "Running $label"
+            try {
+                val result = rt.run(
+                    installed,
+                    LinuxCommandBuilder.of(*command.toTypedArray()),
+                )
+                log.value += "\n$ $label\n${result.output}\n[exit ${result.exitCode}]"
+                status.value = if (result.isSuccess) "Ready" else "Failed"
+            } catch (error: Exception) {
+                log.value += "\n$ $label\nERROR: ${error.message}"
+                status.value = "Failed"
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -193,6 +219,12 @@ private fun SampleScreen() {
             ) {
                 Text("PATH")
             }
+            OutlinedButton(
+                onClick = { runOneShot(listOf("uname", "-a")) },
+                enabled = image != null && runningProcess == null,
+            ) {
+                Text("uname (run)")
+            }
         }
 
         Spacer(Modifier.height(8.dp))
@@ -219,6 +251,8 @@ private fun SampleScreen() {
 }
 
 private fun describe(progress: InstallProgress): String = when (progress.stage) {
+    InstallProgress.Stage.CHECKING -> "Checking"
+
     InstallProgress.Stage.DOWNLOADING -> {
         if (progress.fraction < 0f) {
             // Some mirrors (including cdimage.ubuntu.com) do not send a length.
@@ -229,6 +263,8 @@ private fun describe(progress: InstallProgress): String = when (progress.stage) 
         }
     }
 
+    InstallProgress.Stage.VERIFYING -> "Verifying"
     InstallProgress.Stage.EXTRACTING -> "Extracting"
     InstallProgress.Stage.CONFIGURING -> "Configuring"
+    InstallProgress.Stage.READY -> "Ready"
 }

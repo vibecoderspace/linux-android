@@ -29,7 +29,7 @@ android {
 }
 
 group = "com.github.vibecoderspace"
-version = System.getenv("VERSION") ?: "0.1.1"
+version = System.getenv("VERSION") ?: "0.2.0"
 
 afterEvaluate {
     publishing {

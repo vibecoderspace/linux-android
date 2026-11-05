@@ -9,6 +9,7 @@ data class RootfsContext(
     val layout: RootfsLayout,
     val profile: RootfsProfile,
     val hostname: String = LinuxRuntimeOptions.DEFAULT_HOSTNAME,
+    val dnsServers: List<String> = LinuxRuntimeOptions.DEFAULT_DNS_SERVERS,
 )
 
 /**
@@ -39,6 +40,15 @@ interface RootfsProfile {
 
     /** Paths that must exist before the image is considered usable. */
     val requiredPaths: List<String>
+
+    /**
+     * Version of the files written by [configure].
+     *
+     * Bump this when hostname, DNS, init-script, or group handling changes. An
+     * installed image with a different value is reconfigured in place without
+     * downloading the archive again.
+     */
+    val configVersion: Int get() = 1
 
     /** Arguments appended to [shell] for an interactive login shell. */
     fun shellArguments(layout: RootfsLayout): List<String>

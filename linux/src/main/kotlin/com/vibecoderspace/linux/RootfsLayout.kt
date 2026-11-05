@@ -4,35 +4,28 @@ import android.content.Context
 import java.io.File
 
 /**
- * Directory layout for one installed image.
+ * Directory layout for the single installed root filesystem.
  *
- * Everything for a profile lives under `<private>/local/rootfs/<profile-id>/`,
- * which allows several distributions to be installed side by side.
+ * There is exactly one image at `<private>/local/rootfs/`. Switching
+ * distributions replaces the image in place; there is no per-profile directory
+ * and no legacy location.
  */
-class RootfsLayout(
-    val localDir: File,
-    val profileId: String,
-) {
+class RootfsLayout(val localDir: File) {
 
-    val imagesDir: File = File(localDir, "rootfs")
-    val imageDir: File = File(imagesDir, profileId)
-    val sandboxDir: File = File(imageDir, "sandbox")
-    val homeDir: File = File(imageDir, "home")
-    val binDir: File = File(imageDir, "bin")
+    val rootfsDir: File = File(localDir, "rootfs")
+    val sandboxDir: File = File(rootfsDir, "sandbox")
+    val homeDir: File = File(rootfsDir, "home")
+    val binDir: File = File(rootfsDir, "bin")
     val initScript: File = File(binDir, "init")
-    val statFile: File = File(imageDir, "stat")
-    val vmstatFile: File = File(imageDir, "vmstat")
-    val metadataFile: File = File(imageDir, "meta.properties")
-    val markerFile: File = File(imageDir, ".installed")
+    val statFile: File = File(rootfsDir, "stat")
+    val vmstatFile: File = File(rootfsDir, "vmstat")
+    val metadataFile: File = File(rootfsDir, "meta.properties")
+    val markerFile: File = File(rootfsDir, ".installed")
+    val lockFile: File = File(rootfsDir, ".install.lock")
+    val failedFile: File = File(rootfsDir, ".failed")
 
     /** `/data/data/<package>` (or `/data/user/0/<package>`). */
     val privateDir: File = localDir.parentFile ?: localDir
-
-    /** Legacy single-image location used by older builds. */
-    val legacySandboxDir: File = File(localDir, "sandbox")
-    val legacyHomeDir: File = File(localDir, "home")
-    val legacyBinDir: File = File(localDir, "bin")
-    val legacyMarkerFile: File = File(localDir, ".terminal_setup_ok_DO_NOT_REMOVE")
 
     fun isInstalled(): Boolean = markerFile.isFile && sandboxDir.isDirectory
 
@@ -41,8 +34,5 @@ class RootfsLayout(
             val files = context.filesDir
             return File(files.parentFile ?: files, "local")
         }
-
-        fun forProfile(context: Context, profileId: String): RootfsLayout =
-            RootfsLayout(localDir(context), profileId)
     }
 }

@@ -66,7 +66,7 @@ class ProotCommandBuilderTest {
         val root: File = Files.createTempDirectory("linux-android-test").toFile()
         val localDir = File(root, "local").apply { mkdirs() }
         val privateDir = root
-        val layout = RootfsLayout(localDir, "ubuntu-24.04").apply {
+        val layout = RootfsLayout(localDir).apply {
             sandboxDir.mkdirs()
             homeDir.mkdirs()
             binDir.mkdirs()

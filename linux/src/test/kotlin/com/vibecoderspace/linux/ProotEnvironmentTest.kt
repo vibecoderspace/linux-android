@@ -12,7 +12,7 @@ class ProotEnvironmentTest {
     fun `profile and runtime values are merged`() {
         val root = Files.createTempDirectory("linux-android-env").toFile()
         val localDir = File(root, "local").apply { mkdirs() }
-        val layout = RootfsLayout(localDir, "ubuntu-24.04").apply {
+        val layout = RootfsLayout(localDir).apply {
             sandboxDir.mkdirs()
             homeDir.mkdirs()
             binDir.mkdirs()

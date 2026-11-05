@@ -30,3 +30,7 @@ sealed interface RootfsSource {
         override val label: String get() = file.absolutePath
     }
 }
+
+/** SHA-256 for remote archives; null for bundled and imported sources. */
+val RootfsSource.sha256: String?
+    get() = (this as? RootfsSource.Remote)?.sha256

@@ -20,7 +20,9 @@ internal object RootfsConfigurator {
         writeFile(File(etc, "hostname"), context.hostname + "\n")
         writeFile(
             File(etc, "resolv.conf"),
-            "nameserver 8.8.8.8\nnameserver 8.8.4.4\nnameserver 1.1.1.1\n",
+            context.dnsServers.joinToString(separator = "\n", postfix = "\n") {
+                "nameserver $it"
+            },
         )
         writeFile(
             File(etc, "hosts"),

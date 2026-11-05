@@ -1,177 +1,279 @@
 package com.vibecoderspace.linux
 
 import android.content.Context
+import android.os.StatFs
 import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.io.RandomAccessFile
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.channels.FileLock
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
-import java.util.Properties
 
 /**
- * Downloads, extracts, and configures root filesystem images.
+ * Downloads, extracts, and configures the single installed root filesystem.
  *
- * Every image lives under its own directory, so Ubuntu, Debian, and future
- * distributions can coexist. A legacy single-image install from older builds
- * is adopted in place for the Ubuntu profile.
+ * There is one image at [RootfsLayout.rootfsDir]. A different profile or a
+ * different archive source replaces it; there is no per-profile directory and
+ * no legacy adoption path. User data in [RootfsLayout.homeDir] survives a
+ * replacement unless the caller asks to delete it.
  */
 class RootfsInstaller(
     context: Context,
     private val binaries: ProotBinaries? = null,
-    private val hostname: String = LinuxRuntimeOptions.DEFAULT_HOSTNAME,
+    private val options: LinuxRuntimeOptions = LinuxRuntimeOptions(),
 ) {
 
     private val appContext: Context = context.applicationContext
+    private val layout = RootfsLayout(RootfsLayout.localDir(appContext))
+    private val monitor = Any()
 
-    fun installedImages(profiles: List<RootfsProfile>): List<RootfsImage> {
-        val imagesDir = File(RootfsLayout.localDir(appContext), "rootfs")
-        val dirs = imagesDir.listFiles() ?: return emptyList()
-        return dirs.asSequence()
-            .filter { it.isDirectory }
-            .mapNotNull { dir ->
-                val profile = profiles.firstOrNull { it.id == dir.name } ?: return@mapNotNull null
-                val layout = RootfsLayout(RootfsLayout.localDir(appContext), profile.id)
-                if (!layout.isInstalled() || !profile.validate(layout.sandboxDir)) {
-                    return@mapNotNull null
-                }
-                RootfsImage(profile, layout, readInstalledAt(layout))
-            }
-            .sortedBy { it.profile.displayName }
-            .toList()
+    /** The installed image, or null when nothing usable is present. */
+    fun installedImage(profiles: List<RootfsProfile>): RootfsImage? {
+        if (!layout.isInstalled()) return null
+        val metadata = RootfsMetadata.read(layout.metadataFile) ?: return null
+        if (metadata.schema != RootfsMetadata.SCHEMA) return null
+        val profile = profiles.firstOrNull { it.id == metadata.id } ?: return null
+        if (!profile.validate(layout.sandboxDir)) return null
+        return RootfsImage(profile, layout, metadata.installedAt)
     }
 
+    /**
+     * Installs [profile], replacing the current image when the profile, source,
+     * schema, or configuration changed.
+     *
+     * @param keepHome keep `home/` when replacing the image.
+     * @param force    wipe and reinstall even when the current image is valid.
+     */
     fun install(
         profile: RootfsProfile,
+        keepHome: Boolean = true,
+        force: Boolean = false,
         onProgress: (InstallProgress) -> Unit = {},
-    ): RootfsImage {
-        val layout = RootfsLayout(RootfsLayout.localDir(appContext), profile.id)
+    ): RootfsImage = withInstallLock {
+        onProgress(InstallProgress(InstallProgress.Stage.CHECKING))
+        val metadata = RootfsMetadata.read(layout.metadataFile)
 
-        if (layout.isInstalled() && profile.validate(layout.sandboxDir)) {
-            if (installedSource(layout) != profile.source.label) {
-                // The profile now points at a different archive. Keeping the
-                // old image would silently pin users to a stale (or wrong) source.
-                Log.i(TAG, "Source changed for ${profile.id}; reinstalling")
-                deleteRecursively(layout.sandboxDir)
-                layout.markerFile.delete()
-            } else {
-                // Apply hostname/init-script changes without re-downloading.
-                configure(profile, layout)
-                return RootfsImage(profile, layout, readInstalledAt(layout))
+        when (decideInstall(layout, profile, metadata, force)) {
+            InstallDecision.USE_EXISTING -> {
+                val installed = checkNotNull(metadata)
+                onProgress(InstallProgress(InstallProgress.Stage.READY, 1f))
+                RootfsImage(profile, layout, installed.installedAt)
             }
-        }
 
-        migrateLegacy(profile, layout)
-        if (layout.isInstalled() && profile.validate(layout.sandboxDir)) {
-            configure(profile, layout)
-            return RootfsImage(profile, layout, readInstalledAt(layout))
-        }
+            InstallDecision.RECONFIGURE -> {
+                val installed = checkNotNull(metadata)
+                onProgress(InstallProgress(InstallProgress.Stage.CONFIGURING))
+                configure(profile)
+                val updated = installed.copy(
+                    schema = RootfsMetadata.SCHEMA,
+                    configVersion = profile.configVersion,
+                    libraryVersion = RootfsMetadata.LIBRARY_VERSION,
+                )
+                updated.write(layout.metadataFile)
+                onProgress(InstallProgress(InstallProgress.Stage.READY, 1f))
+                RootfsImage(profile, layout, updated.installedAt)
+            }
 
-        prepare(layout)
+            InstallDecision.REINSTALL -> reinstall(profile, keepHome, onProgress)
+        }
+    }
+
+    /** Removes the image. Cached archives are left in the cache directory. */
+    fun uninstall(deleteHome: Boolean = true) = withInstallLock {
+        deleteRecursively(layout.sandboxDir)
+        layout.markerFile.delete()
+        layout.metadataFile.delete()
+        layout.failedFile.delete()
+        layout.initScript.delete()
+        layout.statFile.delete()
+        layout.vmstatFile.delete()
+        if (deleteHome) {
+            deleteRecursively(layout.homeDir)
+        }
+        layout.binDir.delete()
+        if (deleteHome) {
+            layout.rootfsDir.delete()
+        }
+        Unit
+    }
+
+    // ---------------------------------------------------------------- install
+
+    private fun reinstall(
+        profile: RootfsProfile,
+        keepHome: Boolean,
+        onProgress: (InstallProgress) -> Unit,
+    ): RootfsImage {
+        prepare()
+        checkSpace(estimateArchiveBytes(profile) + ESTIMATED_EXTRACTED_BYTES)
 
         val archive = obtainArchive(profile, onProgress)
-        val cleanupArchive = profile.source !is RootfsSource.Imported
         try {
-            onProgress(InstallProgress(InstallProgress.Stage.EXTRACTING, -1f))
-            if (layout.sandboxDir.exists()) {
-                deleteRecursively(layout.sandboxDir)
-            }
-            RootfsConfigurator.ensureDir(layout.sandboxDir)
-            RootfsConfigurator.ensureDir(File(layout.sandboxDir, "tmp"))
-            RootfsConfigurator.chmod(File(layout.sandboxDir, "tmp"), 1023)
+            checkSpace(archive.length() + ESTIMATED_EXTRACTED_BYTES)
 
-            if (!extract(archive, layout)) {
-                throw IOException("Could not extract ${profile.displayName}")
+            // Commit point starts here: once the marker is gone the image is
+            // no longer considered installed, even if extraction fails.
+            layout.markerFile.delete()
+            layout.metadataFile.delete()
+            layout.failedFile.delete()
+            if (!keepHome) {
+                deleteRecursively(layout.homeDir)
+            }
+
+            prepareSandbox()
+            if (profile.source is RootfsSource.Imported) {
+                validateArchive(archive)
+            }
+
+            onProgress(InstallProgress(InstallProgress.Stage.EXTRACTING))
+            if (!extract(archive)) {
+                throw InstallException.Extraction(
+                    "Could not extract ${profile.displayName}",
+                )
             }
             if (!profile.validate(layout.sandboxDir)) {
-                throw IOException(
-                    "${profile.displayName} is missing ${profile.requiredPaths.joinToString()}",
+                throw InstallException.Validation(
+                    "${profile.displayName} is missing " +
+                        profile.requiredPaths.joinToString(),
                 )
             }
 
-            onProgress(InstallProgress(InstallProgress.Stage.CONFIGURING, -1f))
-            configure(profile, layout)
-            writeMetadata(layout, profile, System.currentTimeMillis())
+            onProgress(InstallProgress(InstallProgress.Stage.CONFIGURING))
+            configure(profile)
+
+            val installedAt = System.currentTimeMillis()
+            RootfsMetadata(
+                schema = RootfsMetadata.SCHEMA,
+                id = profile.id,
+                displayName = profile.displayName,
+                source = profile.source.label,
+                sha256 = profile.source.sha256,
+                installedAt = installedAt,
+                configVersion = profile.configVersion,
+                libraryVersion = RootfsMetadata.LIBRARY_VERSION,
+            ).write(layout.metadataFile)
             RootfsConfigurator.createEmptyFile(layout.markerFile)
-            onProgress(InstallProgress(InstallProgress.Stage.CONFIGURING, 1f))
+            layout.failedFile.delete()
+
+            onProgress(InstallProgress(InstallProgress.Stage.READY, 1f))
             Log.i(TAG, "${profile.displayName} installed at ${layout.sandboxDir}")
-            return RootfsImage(profile, layout, System.currentTimeMillis())
+            return RootfsImage(profile, layout, installedAt)
+        } catch (error: Throwable) {
+            writeFailure(error)
+            throw error
         } finally {
-            if (cleanupArchive) {
+            if (profile.source !is RootfsSource.Imported) {
                 archive.delete()
             }
         }
     }
 
-    // ------------------------------------------------------------------ layout
-
-    private fun configure(profile: RootfsProfile, layout: RootfsLayout) {
-        profile.configure(RootfsContext(appContext, layout, profile, hostname))
+    private fun configure(profile: RootfsProfile) {
+        profile.configure(
+            RootfsContext(
+                appContext = appContext,
+                layout = layout,
+                profile = profile,
+                hostname = options.hostname,
+                dnsServers = options.dnsServers,
+            ),
+        )
     }
 
-    private fun prepare(layout: RootfsLayout) {
-        RootfsConfigurator.ensureDir(layout.imageDir)
+    private fun prepare() {
+        RootfsConfigurator.ensureDir(layout.rootfsDir)
         RootfsConfigurator.ensureDir(layout.homeDir)
         RootfsConfigurator.ensureDir(layout.binDir)
         RootfsConfigurator.createEmptyFile(layout.statFile)
         RootfsConfigurator.createEmptyFile(layout.vmstatFile)
     }
 
-    private fun migrateLegacy(profile: RootfsProfile, layout: RootfsLayout) {
-        if (profile.id != LEGACY_UBUNTU_ID) return
-        if (layout.markerFile.exists()) return
-        if (!layout.legacyMarkerFile.isFile || !layout.legacySandboxDir.isDirectory) return
+    private fun prepareSandbox() {
+        deleteRecursively(layout.sandboxDir)
+        RootfsConfigurator.ensureDir(layout.sandboxDir)
+        val tmp = RootfsConfigurator.ensureDir(File(layout.sandboxDir, "tmp"))
+        RootfsConfigurator.chmod(tmp, 1023)
+    }
 
-        RootfsConfigurator.ensureDir(layout.imageDir)
-        if (!layout.legacySandboxDir.renameTo(layout.sandboxDir)) {
-            Log.w(TAG, "Could not adopt the legacy rootfs; a fresh image will be installed")
-            return
+    private fun writeFailure(error: Throwable) {
+        runCatching {
+            layout.failedFile.writeText(
+                "${error::class.java.name}: ${error.message}\n",
+            )
         }
-        layout.legacyHomeDir.renameTo(layout.homeDir)
-        layout.legacyBinDir.renameTo(layout.binDir)
+    }
 
-        writeMetadata(layout, profile, layout.markerFile.lastModified())
-        RootfsConfigurator.createEmptyFile(layout.markerFile)
-        Log.i(TAG, "Adopted the legacy Ubuntu rootfs at ${layout.sandboxDir}")
+    // ------------------------------------------------------------------ space
+
+    private fun estimateArchiveBytes(profile: RootfsProfile): Long =
+        when (val source = profile.source) {
+            is RootfsSource.Imported -> source.file.length()
+            is RootfsSource.Bundled ->
+                runCatching { appContext.assets.openFd(source.assetPath).length }
+                    .getOrDefault(ESTIMATED_ARCHIVE_BYTES)
+            is RootfsSource.Remote ->
+                cacheFile(profile).takeIf { it.isFile }?.length()
+                    ?: ESTIMATED_ARCHIVE_BYTES
+        }
+
+    private fun checkSpace(requiredBytes: Long) {
+        val available = runCatching {
+            StatFs(layout.localDir.absolutePath).availableBytes
+        }.getOrDefault(Long.MAX_VALUE)
+        if (available < requiredBytes) {
+            throw InstallException.InsufficientSpace(requiredBytes, available)
+        }
     }
 
     // ------------------------------------------------------------------ archive
 
+    private fun cacheFile(profile: RootfsProfile): File {
+        val suffix = profile.source.sha256?.take(12) ?: "archive"
+        return File(
+            File(appContext.cacheDir, CACHE_DIR),
+            "${profile.id}-$suffix.tar.gz",
+        )
+    }
+
     private fun obtainArchive(
         profile: RootfsProfile,
         onProgress: (InstallProgress) -> Unit,
-    ): File {
-        val cached = File(File(appContext.cacheDir, CACHE_DIR), "${profile.id}.tar.gz")
-
-        return when (val source = profile.source) {
-            is RootfsSource.Remote -> {
-                if (cached.isFile && cached.length() > MIN_ARCHIVE_BYTES) {
-                    verify(cached, source.sha256)
-                    cached
-                } else {
-                    download(source, cached, onProgress)
-                    cached
-                }
-            }
-
-            is RootfsSource.Bundled -> {
-                if (cached.isFile && cached.length() > MIN_ARCHIVE_BYTES) {
-                    verify(cached, null)
-                } else {
-                    copyAsset(source.assetPath, cached)
-                }
+    ): File = when (val source = profile.source) {
+        is RootfsSource.Remote -> {
+            val cached = cacheFile(profile)
+            if (cached.isFile && cached.length() > MIN_ARCHIVE_BYTES &&
+                verify(cached, source.sha256)
+            ) {
+                cached
+            } else {
+                cached.delete()
+                download(source, cached, onProgress)
                 cached
             }
+        }
 
-            is RootfsSource.Imported -> {
-                if (!source.file.isFile) {
-                    throw IOException("Rootfs archive not found: ${source.file}")
-                }
-                source.file
+        is RootfsSource.Bundled -> {
+            val cached = cacheFile(profile)
+            if (cached.isFile && cached.length() > MIN_ARCHIVE_BYTES) {
+                cached
+            } else {
+                copyAsset(source.assetPath, cached)
+                cached
             }
+        }
+
+        is RootfsSource.Imported -> {
+            if (!source.file.isFile) {
+                throw InstallException.Network(
+                    "Rootfs archive not found: ${source.file}",
+                )
+            }
+            source.file
         }
     }
 
@@ -181,6 +283,42 @@ class RootfsInstaller(
         onProgress: (InstallProgress) -> Unit,
     ) {
         target.parentFile?.let { RootfsConfigurator.ensureDir(it) }
+
+        var lastError: Throwable? = null
+        for (attempt in 1..MAX_DOWNLOAD_ATTEMPTS) {
+            try {
+                downloadOnce(source, target, onProgress)
+                onProgress(InstallProgress(InstallProgress.Stage.VERIFYING))
+                if (verify(target, source.sha256)) {
+                    return
+                }
+                target.delete()
+                throw InstallException.Checksum(
+                    "SHA-256 mismatch for ${target.name}",
+                )
+            } catch (error: InstallException.Checksum) {
+                lastError = error
+                // One re-download is enough; a second identical failure means
+                // the published checksum is wrong.
+                if (attempt >= 2) break
+            } catch (error: IOException) {
+                lastError = error
+                target.delete()
+                if (attempt < MAX_DOWNLOAD_ATTEMPTS) {
+                    runCatching { Thread.sleep(500L * attempt) }
+                }
+            }
+        }
+        throw lastError ?: InstallException.Network(
+            "Could not download ${source.url}",
+        )
+    }
+
+    private fun downloadOnce(
+        source: RootfsSource.Remote,
+        target: File,
+        onProgress: (InstallProgress) -> Unit,
+    ) {
         val part = File(target.absolutePath + ".part")
         part.delete()
 
@@ -240,7 +378,6 @@ class RootfsInstaller(
             if (!part.renameTo(target)) {
                 throw IOException("Could not finalize $target")
             }
-            verify(target, source.sha256)
             onProgress(InstallProgress(InstallProgress.Stage.DOWNLOADING, 1f))
             Log.i(TAG, "Downloaded $copied bytes to $target")
         } finally {
@@ -268,8 +405,8 @@ class RootfsInstaller(
         }
     }
 
-    private fun verify(file: File, expectedSha256: String?) {
-        if (expectedSha256.isNullOrBlank()) return
+    private fun verify(file: File, expectedSha256: String?): Boolean {
+        if (expectedSha256.isNullOrBlank()) return true
         val digest = MessageDigest.getInstance("SHA-256")
         file.inputStream().use { input ->
             val buffer = ByteArray(64 * 1024)
@@ -280,27 +417,23 @@ class RootfsInstaller(
             }
         }
         val actual = digest.digest().joinToString("") { "%02x".format(it) }
-        if (!actual.equals(expectedSha256, ignoreCase = true)) {
-            file.delete()
-            throw IOException("SHA-256 mismatch for ${file.name}")
-        }
+        return actual.equals(expectedSha256, ignoreCase = true)
     }
 
     // ---------------------------------------------------------------- extraction
 
-    private fun extract(archive: File, layout: RootfsLayout): Boolean {
+    private fun extract(archive: File): Boolean {
         val proot = binaries
-        if (proot != null && extractWithProot(proot, archive, layout)) {
+        if (proot != null && extractWithProot(proot, archive)) {
             return true
         }
         Log.w(TAG, "Falling back to the system tar")
-        return extractWithTar(archive, layout)
+        return extractWithTar(archive)
     }
 
     private fun extractWithProot(
         proot: ProotBinaries,
         archive: File,
-        layout: RootfsLayout,
     ): Boolean {
         val tmp = RootfsConfigurator.ensureDir(File(appContext.cacheDir, "proot-extract"))
 
@@ -338,7 +471,7 @@ class RootfsInstaller(
         return runProcess(args, tmp, proot.loader.absolutePath, "PRoot extraction")
     }
 
-    private fun extractWithTar(archive: File, layout: RootfsLayout): Boolean {
+    private fun extractWithTar(archive: File): Boolean {
         if (!File("/system/bin/tar").isFile) {
             Log.e(TAG, "No /system/bin/tar available")
             return false
@@ -352,87 +485,128 @@ class RootfsInstaller(
         return runProcess(args, File(appContext.cacheDir, "tar-extract"), null, "tar extraction")
     }
 
+    /**
+     * Rejects archives that would write outside the sandbox.
+     *
+     * Only imported archives are checked; remote and bundled archives are
+     * pinned by SHA-256 and produced by the profile author.
+     */
+    private fun validateArchive(archive: File) {
+        if (!File("/system/bin/tar").isFile) return
+        val outcome = runProcessCapture(
+            command = listOf(
+                "/system/bin/sh",
+                "-c",
+                "/system/bin/tar -tf " + shellQuote(archive.absolutePath),
+            ),
+            workingDir = File(appContext.cacheDir, "tar-list"),
+            prootLoader = null,
+            maxOutputBytes = 4 * 1024 * 1024,
+        )
+        if (outcome.exitCode != 0) {
+            throw InstallException.Extraction(
+                "Could not inspect ${archive.name}: ${outcome.output}",
+            )
+        }
+        for (line in outcome.output.lineSequence()) {
+            val entry = line.trim()
+            if (entry.isEmpty()) continue
+            if (entry.startsWith("/") || entry.split('/').any { it == ".." }) {
+                throw InstallException.Extraction("Unsafe archive entry: $entry")
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ process
+
     private fun runProcess(
         command: List<String>,
         workingDir: File,
         prootLoader: String?,
         label: String,
-    ): Boolean {
-        RootfsConfigurator.ensureDir(workingDir)
-        return try {
-            val builder = ProcessBuilder(command)
-                .directory(workingDir)
-                .redirectErrorStream(true)
-            builder.environment().apply {
-                put("TMPDIR", workingDir.absolutePath)
-                put("PROOT_TMP_DIR", workingDir.absolutePath)
-                if (prootLoader != null) put("PROOT_LOADER", prootLoader)
-            }
-
-            val process = builder.start()
-            val output = readStream(process.inputStream)
-            val exitCode = process.waitFor()
-            if (exitCode != 0) {
-                Log.e(TAG, "$label failed with exit code $exitCode: $output")
-                false
-            } else {
-                Log.i(TAG, "$label finished successfully")
-                true
-            }
-        } catch (error: Exception) {
-            Log.e(TAG, "$label failed", error)
+    ): Boolean = try {
+        val outcome = runProcessCapture(command, workingDir, prootLoader)
+        if (outcome.exitCode != 0) {
+            Log.e(TAG, "$label failed with exit code ${outcome.exitCode}: ${outcome.output}")
             false
+        } else {
+            Log.i(TAG, "$label finished successfully")
+            true
         }
+    } catch (error: Exception) {
+        Log.e(TAG, "$label failed", error)
+        false
     }
 
-    // ------------------------------------------------------------------ metadata
-
-    private fun writeMetadata(layout: RootfsLayout, profile: RootfsProfile, installedAt: Long) {
-        val properties = Properties()
-        properties["id"] = profile.id
-        properties["displayName"] = profile.displayName
-        properties["source"] = profile.source.label
-        properties["installedAt"] = installedAt.toString()
-        layout.metadataFile.outputStream().use { properties.store(it, "linux-android rootfs") }
-    }
-
-    private fun readInstalledAt(layout: RootfsLayout): Long {
-        val properties = Properties()
-        runCatching {
-            layout.metadataFile.inputStream().use { properties.load(it) }
+    private fun runProcessCapture(
+        command: List<String>,
+        workingDir: File,
+        prootLoader: String?,
+        maxOutputBytes: Int = 16 * 1024,
+    ): ProcessOutcome {
+        RootfsConfigurator.ensureDir(workingDir)
+        val builder = ProcessBuilder(command)
+            .directory(workingDir)
+            .redirectErrorStream(true)
+        builder.environment().apply {
+            put("TMPDIR", workingDir.absolutePath)
+            put("PROOT_TMP_DIR", workingDir.absolutePath)
+            if (prootLoader != null) put("PROOT_LOADER", prootLoader)
         }
-        return properties.getProperty("installedAt")?.toLongOrNull()
-            ?: layout.markerFile.lastModified()
+
+        val process = builder.start()
+        val output = readStream(process.inputStream, maxOutputBytes)
+        val exitCode = process.waitFor()
+        return ProcessOutcome(exitCode, output)
     }
 
-    /** Source label recorded at install time, or null for images without metadata. */
-    private fun installedSource(layout: RootfsLayout): String? {
-        val properties = Properties()
-        runCatching {
-            layout.metadataFile.inputStream().use { properties.load(it) }
-        }
-        return properties.getProperty("source")
-    }
+    private data class ProcessOutcome(val exitCode: Int, val output: String)
 
-    // --------------------------------------------------------------------- utils
-
-    private fun readStream(input: InputStream): String {
+    private fun readStream(input: InputStream, maxBytes: Int): String {
         val builder = StringBuilder()
+        var stored = 0
         input.use { stream ->
             val buffer = ByteArray(4096)
             while (true) {
                 val read = stream.read(buffer)
                 if (read == -1) break
-                if (builder.length < 16 * 1024) {
-                    builder.append(String(buffer, 0, read, StandardCharsets.UTF_8))
+                if (stored < maxBytes) {
+                    val keep = minOf(read, maxBytes - stored)
+                    builder.append(String(buffer, 0, keep, StandardCharsets.UTF_8))
+                    stored += keep
                 }
             }
         }
         return builder.toString().trim()
     }
 
+    // --------------------------------------------------------------------- lock
+
+    /**
+     * Serializes installs across coroutines and, when the filesystem supports
+     * it, across processes. The file lock is best-effort; the in-process
+     * monitor always applies.
+     */
+    private fun <T> withInstallLock(block: () -> T): T = synchronized(monitor) {
+        RootfsConfigurator.ensureDir(layout.rootfsDir)
+        var handle: RandomAccessFile? = null
+        var lock: FileLock? = null
+        try {
+            handle = runCatching { RandomAccessFile(layout.lockFile, "rw") }.getOrNull()
+            lock = runCatching { handle?.channel?.lock() }.getOrNull()
+            block()
+        } finally {
+            runCatching { lock?.release() }
+            runCatching { handle?.close() }
+        }
+    }
+
+    // --------------------------------------------------------------------- utils
+
     private fun deleteRecursively(file: File) {
-        if (runCatching { java.nio.file.Files.isSymbolicLink(file.toPath()) }.getOrDefault(false)) {
+        if (runCatching { java.nio.file.Files.isSymbolicLink(file.toPath()) }
+                .getOrDefault(false)
+        ) {
             file.delete()
             return
         }
@@ -455,6 +629,40 @@ class RootfsInstaller(
         const val TAG = "RootfsInstaller"
         const val CACHE_DIR = "linux-android"
         const val MIN_ARCHIVE_BYTES = 1L * 1024L * 1024L
-        const val LEGACY_UBUNTU_ID = "ubuntu-24.04"
+        const val MAX_DOWNLOAD_ATTEMPTS = 3
+
+        /** Used only when the archive size cannot be known before downloading. */
+        const val ESTIMATED_ARCHIVE_BYTES = 64L * 1024L * 1024L
+
+        /** Conservative upper bound for the unpacked base image. */
+        const val ESTIMATED_EXTRACTED_BYTES = 160L * 1024L * 1024L
     }
+}
+
+internal enum class InstallDecision {
+    USE_EXISTING,
+    RECONFIGURE,
+    REINSTALL,
+}
+
+/**
+ * Decides whether the current image can be reused, only needs its
+ * configuration refreshed, or must be replaced.
+ */
+internal fun decideInstall(
+    layout: RootfsLayout,
+    profile: RootfsProfile,
+    metadata: RootfsMetadata?,
+    force: Boolean = false,
+): InstallDecision {
+    if (force) return InstallDecision.REINSTALL
+    if (!layout.isInstalled()) return InstallDecision.REINSTALL
+    if (metadata == null) return InstallDecision.REINSTALL
+    if (metadata.schema != RootfsMetadata.SCHEMA) return InstallDecision.REINSTALL
+    if (!profile.validate(layout.sandboxDir)) return InstallDecision.REINSTALL
+    if (metadata.id != profile.id) return InstallDecision.REINSTALL
+    if (metadata.source != profile.source.label) return InstallDecision.REINSTALL
+    if (metadata.sha256 != profile.source.sha256) return InstallDecision.REINSTALL
+    if (metadata.configVersion != profile.configVersion) return InstallDecision.RECONFIGURE
+    return InstallDecision.USE_EXISTING
 }

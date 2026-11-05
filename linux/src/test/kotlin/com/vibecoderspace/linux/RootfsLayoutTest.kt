@@ -10,22 +10,26 @@ import org.junit.Test
 class RootfsLayoutTest {
 
     @Test
-    fun `each profile gets its own image directory`() {
+    fun `single image lives directly under rootfs`() {
         val localDir = Files.createTempDirectory("linux-android-layout").toFile()
-        val ubuntu = RootfsLayout(localDir, "ubuntu-24.04")
-        val debian = RootfsLayout(localDir, "debian-12")
+        val layout = RootfsLayout(localDir)
 
-        assertEquals(File(localDir, "rootfs/ubuntu-24.04"), ubuntu.imageDir)
-        assertEquals(File(localDir, "rootfs/debian-12"), debian.imageDir)
-        assertEquals(File(localDir, "rootfs/ubuntu-24.04/sandbox"), ubuntu.sandboxDir)
-        assertEquals(File(localDir, "rootfs/ubuntu-24.04/home"), ubuntu.homeDir)
-        assertEquals(localDir.parentFile, ubuntu.privateDir)
+        assertEquals(File(localDir, "rootfs"), layout.rootfsDir)
+        assertEquals(File(localDir, "rootfs/sandbox"), layout.sandboxDir)
+        assertEquals(File(localDir, "rootfs/home"), layout.homeDir)
+        assertEquals(File(localDir, "rootfs/bin"), layout.binDir)
+        assertEquals(File(localDir, "rootfs/bin/init"), layout.initScript)
+        assertEquals(File(localDir, "rootfs/meta.properties"), layout.metadataFile)
+        assertEquals(File(localDir, "rootfs/.installed"), layout.markerFile)
+        assertEquals(File(localDir, "rootfs/.install.lock"), layout.lockFile)
+        assertEquals(File(localDir, "rootfs/.failed"), layout.failedFile)
+        assertEquals(localDir.parentFile, layout.privateDir)
     }
 
     @Test
     fun `installed requires both the marker and the sandbox`() {
         val localDir = Files.createTempDirectory("linux-android-installed").toFile()
-        val layout = RootfsLayout(localDir, "ubuntu-24.04")
+        val layout = RootfsLayout(localDir)
 
         assertFalse(layout.isInstalled())
 

@@ -34,7 +34,7 @@ class RootfsProfileTest {
     @Test
     fun `shell arguments use the profile init script`() {
         val localDir = Files.createTempDirectory("linux-android-layout").toFile()
-        val layout = RootfsLayout(localDir, DefaultProfiles.ubuntu.id)
+        val layout = RootfsLayout(localDir)
 
         val arguments = DefaultProfiles.ubuntu.shellArguments(layout)
 
