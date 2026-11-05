@@ -1,0 +1,6 @@
+jdk:
+  - openjdk17
+before_install:
+  - yes | sdkmanager --licenses > /dev/null || true
+  - sdkmanager --install "platforms;android-37.2" || true
+  - sdkmanager --install "build-tools;37.0.0-rc2" || true
