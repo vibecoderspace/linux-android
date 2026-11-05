@@ -52,8 +52,8 @@ class RootfsInstaller(
 
         if (layout.isInstalled() && profile.validate(layout.sandboxDir)) {
             if (installedSource(layout) != profile.source.label) {
-                // The profile now points at a different archive. Keep the old
-                // image would silently pin users to a stale (or wrong) source.
+                // The profile now points at a different archive. Keeping the
+                // old image would silently pin users to a stale (or wrong) source.
                 Log.i(TAG, "Source changed for ${profile.id}; reinstalling")
                 deleteRecursively(layout.sandboxDir)
                 layout.markerFile.delete()

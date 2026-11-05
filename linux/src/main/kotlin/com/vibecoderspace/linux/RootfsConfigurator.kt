@@ -25,7 +25,7 @@ internal object RootfsConfigurator {
         writeFile(
             File(etc, "hosts"),
             "127.0.0.1   localhost.localdomain localhost\n" +
-                "127.0.1.1   " + context.hostname + "\n" +
+                "127.0.1.1   ${context.hostname}\n" +
                 "\n" +
                 "# IPv6.\n" +
                 "::1         localhost.localdomain localhost ip6-localhost ip6-loopback\n" +
