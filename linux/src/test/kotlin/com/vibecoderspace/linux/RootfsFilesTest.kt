@@ -8,8 +8,8 @@ import org.junit.Test
 class RootfsFilesTest {
 
     @Test
-    fun `hostname ends with a newline`() {
-        assertEquals("myapp\n", RootfsFiles.hostname("myapp"))
+    fun `hostname is localhost`() {
+        assertEquals("localhost\n", RootfsFiles.hostname())
     }
 
     @Test
@@ -21,12 +21,13 @@ class RootfsFilesTest {
     }
 
     @Test
-    fun `hosts maps localhost and the configured hostname`() {
-        val hosts = RootfsFiles.hosts("myapp")
+    fun `hosts maps localhost once`() {
+        val hosts = RootfsFiles.hosts()
 
-        assertTrue(hosts.contains("127.0.0.1   localhost.localdomain localhost"))
-        assertTrue(hosts.contains("127.0.1.1   myapp"))
-        assertTrue(hosts.contains("::1"))
+        assertTrue(hosts.contains("127.0.0.1   localhost\n"))
+        assertTrue(hosts.contains("::1         localhost"))
+        assertFalse(hosts.contains("localhost.localdomain"))
+        assertFalse(hosts.contains("127.0.1.1"))
         assertTrue(hosts.endsWith("\n"))
     }
 

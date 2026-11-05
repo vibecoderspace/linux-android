@@ -8,19 +8,18 @@ package com.vibecoderspace.linux
  */
 internal object RootfsFiles {
 
-    fun hostname(hostname: String): String = "$hostname\n"
+    fun hostname(): String = "localhost\n"
 
     fun resolvConf(dnsServers: List<String>): String =
         dnsServers.joinToString(separator = "\n", postfix = "\n") {
             "nameserver $it"
         }
 
-    fun hosts(hostname: String): String =
-        "127.0.0.1   localhost.localdomain localhost\n" +
-            "127.0.1.1   $hostname\n" +
+    fun hosts(): String =
+        "127.0.0.1   localhost\n" +
             "\n" +
             "# IPv6.\n" +
-            "::1         localhost.localdomain localhost ip6-localhost ip6-loopback\n" +
+            "::1         localhost ip6-localhost ip6-loopback\n" +
             "fe00::0     ip6-localnet\n" +
             "ff00::0     ip6-mcastprefix\n" +
             "ff02::1     ip6-allnodes\n" +
