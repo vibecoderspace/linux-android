@@ -1,11 +1,14 @@
 # linux-android
 
-A small Android library that provisions Linux root filesystems with
-[PRoot](https://github.com/termux/proot)-based extraction.
+Two small Android modules for running Linux userlands with
+[PRoot](https://github.com/termux/proot):
 
-It is deliberately limited to setup: download, verify, extract, configure, and
-validate one image. The host app owns the terminal, PRoot argv, environment,
-and process lifecycle.
+- `:linux` provisions a root filesystem: download, verify, extract, configure,
+  and validate one image.
+- `:process` starts processes inside an installed image: PRoot argv,
+  environment, and `ProcessBuilder` lifecycle.
+
+The host app still owns the terminal UI and any PTY it needs.
 
 ## Features
 
@@ -14,8 +17,8 @@ and process lifecycle.
 - Serialized installs, disk checks, download retries, and cached archives.
 - Metadata schema with profile, source, checksum, and config version.
 - Install, reinstall, and delete without touching `home/` unless asked.
-- Distro behavior lives in a profile, not in the installer.
-- Host-supplied PRoot binaries, so the library stays Apache-2.0.
+- Start guest commands with a complete PRoot argv and environment.
+- Host-supplied PRoot binaries, so the libraries stay Apache-2.0.
 
 ## Status
 
@@ -32,6 +35,7 @@ repositories {
 
 dependencies {
     implementation("com.github.vibecoderspace:linux-android:v0.2.0")
+    implementation("com.github.vibecoderspace:linux-android-process:v0.2.0")
 }
 ```
 
@@ -43,6 +47,8 @@ includeBuild("../linux-android") {
     dependencySubstitution {
         substitute(module("com.github.vibecoderspace:linux-android"))
             .using(project(":linux"))
+        substitute(module("com.github.vibecoderspace:linux-android-process"))
+            .using(project(":process"))
     }
 }
 ```
@@ -74,6 +80,8 @@ android {
 
 ## Usage
 
+### Root filesystem
+
 ```kotlin
 val binaries = ProotBinaries.fromNativeLibraryDir(context)
     ?: error("PRoot binaries are missing")
@@ -102,8 +110,40 @@ image.layout.sandboxDir         same tree, as a File
 image.layout.homeDir            user data, kept on reinstall
 ```
 
-The library does not launch the shell or any other process. The app builds the
-PRoot argv and environment it needs, then starts the process itself.
+### Starting a process
+
+`:process` builds the PRoot argv and environment, then starts the process:
+
+```kotlin
+val runner = ProotProcessRunner(context, binaries)
+
+val process = runner.start(
+    image,
+    ProcessSpec(listOf("/bin/bash", "-lc", "uname -a")),
+)
+
+println(process.output.bufferedReader().readText())
+val exitCode = process.awaitExit()
+```
+
+Long-running services can write straight to a log file:
+
+```kotlin
+val server = runner.start(
+    image,
+    ProcessSpec(
+        command = listOf("/home/.opencode/bin/opencode", "serve", "--port", "4097"),
+        logFile = File(context.cacheDir, "opencode.log"),
+    ),
+)
+
+server.stop()
+```
+
+`ProcessSpec` accepts a guest working directory, extra environment variables,
+a log file, and stderr merging. The runner binds the image's `home/` at `/home`
+and `/root`, the app's private directory at its host path, and the usual
+Android system paths.
 
 ### Hostname and DNS
 

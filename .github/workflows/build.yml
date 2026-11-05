@@ -26,7 +26,7 @@ jobs:
           sdkmanager --install "build-tools;37.0.0-rc2" || true
 
       - name: Unit tests
-        run: ./gradlew :linux:test --no-daemon
+        run: ./gradlew :linux:test :process:test --no-daemon
 
       - name: Assemble sample
         run: ./gradlew :sample:assembleDebug --no-daemon

@@ -17,4 +17,5 @@ dependencyResolutionManagement {
 rootProject.name = "linux-android"
 
 include(":linux")
+include(":process")
 include(":sample")
