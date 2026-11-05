@@ -89,13 +89,9 @@ class RootfsInstaller(
         layout.markerFile.delete()
         layout.metadataFile.delete()
         layout.failedFile.delete()
-        layout.initScript.delete()
-        layout.statFile.delete()
-        layout.vmstatFile.delete()
         if (deleteHome) {
             deleteRecursively(layout.homeDir)
         }
-        layout.binDir.delete()
         if (deleteHome) {
             layout.rootfsDir.delete()
         }
@@ -188,9 +184,6 @@ class RootfsInstaller(
     private fun prepare() {
         RootfsConfigurator.ensureDir(layout.rootfsDir)
         RootfsConfigurator.ensureDir(layout.homeDir)
-        RootfsConfigurator.ensureDir(layout.binDir)
-        RootfsConfigurator.createEmptyFile(layout.statFile)
-        RootfsConfigurator.createEmptyFile(layout.vmstatFile)
     }
 
     private fun prepareSandbox() {

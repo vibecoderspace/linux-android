@@ -7,12 +7,12 @@ import java.io.IOException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 
-/** Writes the files shared by Debian-style images. */
+/** Writes the files shared by the supported Linux images. */
 internal object RootfsConfigurator {
 
     private const val TAG = "RootfsConfigurator"
 
-    fun configure(context: RootfsContext, initScript: String) {
+    fun configure(context: RootfsContext) {
         val sandbox = context.layout.sandboxDir
         val etc = ensureDir(File(sandbox, "etc"))
 
@@ -29,12 +29,6 @@ internal object RootfsConfigurator {
         appendAndroidGroups(File(etc, "group"))
         ensureDir(File(sandbox, "usr/local/bin"))
         ensureDir(File(sandbox, "tmp"))
-
-        writeFile(context.layout.initScript, initScript)
-        chmod(context.layout.initScript, 493)
-
-        createEmptyFile(context.layout.statFile)
-        createEmptyFile(context.layout.vmstatFile)
     }
 
     private fun appendAndroidGroups(groupFile: File) {

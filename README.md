@@ -93,7 +93,6 @@ val image = runtime.installedImage()
 println(image.profile.displayName)
 println(image.layout.sandboxDir)
 println(image.layout.homeDir)
-println(image.layout.initScript)
 ```
 
 The returned `RootfsImage` exposes the layout the host app needs:
@@ -101,10 +100,7 @@ The returned `RootfsImage` exposes the layout the host app needs:
 ```text
 image.rootfsDir                 extracted root filesystem
 image.layout.sandboxDir         same tree, as a File
-image.layout.homeDir            bind at /home and /root
-image.layout.initScript         profile init script for the app's shell
-image.layout.statFile           empty /proc/stat override
-image.layout.vmstatFile         empty /proc/vmstat override
+image.layout.homeDir            user data, kept on reinstall
 ```
 
 The library does not launch the shell or any other process. The app builds the
@@ -132,8 +128,8 @@ There is exactly one installed image. Installing a different profile replaces
 the current one:
 
 ```kotlin
-// Ubuntu -> Debian: sandbox, init script and metadata are replaced.
-val image = runtime.install(DefaultProfiles.debian)
+// A different profile replaces sandbox/ and metadata, keeping home/.
+val image = runtime.install(MyProfile())
 ```
 
 Recovery and removal:
@@ -152,29 +148,24 @@ cleanly. A corrupt cached archive is deleted and downloaded again.
 
 ## Profiles
 
-| Profile | ID | Shell | Source |
-|---|---|---|---|
-| `DefaultProfiles.ubuntu` | `ubuntu-24.04` | `/bin/bash` | Ubuntu Base 24.04.4 (cdimage.ubuntu.com) |
-| `DefaultProfiles.debian` | `debian-12` | `/bin/bash` | Debian bookworm slim rootfs |
+| Profile | ID | Source |
+|---|---|---|
+| `DefaultProfiles.ubuntu` | `ubuntu-24.04` | Ubuntu Base 24.04.4 (cdimage.ubuntu.com) |
 
-A custom profile only needs to describe the distribution:
+A custom profile only needs to describe the archive and the paths it must
+contain:
 
 ```kotlin
 class MyProfile : RootfsProfile {
     override val id = "my-distro"
     override val displayName = "My distro"
     override val source = RootfsSource.Imported(File("/sdcard/my-rootfs.tar.gz"))
-    override val shell = "/bin/sh"
-    override val guestPath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-    override val locale = "C.UTF-8"
     override val requiredPaths = listOf("bin/sh")
-
-    override fun shellArguments(layout: RootfsLayout) = listOf("-l")
-    override fun initScript() = "export PS1='$ '\n"
-    override fun environment(layout: RootfsLayout) =
-        mapOf("HOME" to "/home", "PATH" to guestPath)
 }
 ```
+
+Override `configure(context)` when the distribution needs extra files written
+after extraction.
 
 ## Storage layout
 
@@ -182,9 +173,7 @@ class MyProfile : RootfsProfile {
 <private>/local/
   rootfs/
     sandbox/          extracted root filesystem        (-r target)
-    home/             bind-mounted at /home and /root  (kept on replace)
-    bin/init          profile init script
-    stat, vmstat      PRoot /proc overrides
+    home/             user data                        (kept on reinstall)
     meta.properties   schema, profile, source, checksum, config version
     .installed        commit marker, written last
     .install.lock     install serialization

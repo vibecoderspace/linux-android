@@ -5,7 +5,7 @@ package com.vibecoderspace.linux
  *
  * [hostname] is written to the guest's `/etc/hostname` and to `/etc/hosts`.
  * The default is deliberately neutral; apps should pass their own name if they
- * want the shell prompt to show something specific.
+ * want the guest to show something specific.
  *
  * [dnsServers] are written to `/etc/resolv.conf` when an image is configured.
  */

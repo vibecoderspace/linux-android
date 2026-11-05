@@ -185,7 +185,6 @@ private fun describeImage(image: RootfsImage): String = buildString {
     appendLine("rootfs:    ${image.rootfsDir.absolutePath}")
     appendLine("sandbox:   ${image.layout.sandboxDir.absolutePath}")
     appendLine("home:      ${image.layout.homeDir.absolutePath}")
-    appendLine("init:      ${image.layout.initScript.absolutePath}")
     appendLine("installed: ${image.installedAt}")
 }
 

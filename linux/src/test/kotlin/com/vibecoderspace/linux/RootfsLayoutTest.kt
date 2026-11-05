@@ -17,8 +17,6 @@ class RootfsLayoutTest {
         assertEquals(File(localDir, "rootfs"), layout.rootfsDir)
         assertEquals(File(localDir, "rootfs/sandbox"), layout.sandboxDir)
         assertEquals(File(localDir, "rootfs/home"), layout.homeDir)
-        assertEquals(File(localDir, "rootfs/bin"), layout.binDir)
-        assertEquals(File(localDir, "rootfs/bin/init"), layout.initScript)
         assertEquals(File(localDir, "rootfs/meta.properties"), layout.metadataFile)
         assertEquals(File(localDir, "rootfs/.installed"), layout.markerFile)
         assertEquals(File(localDir, "rootfs/.install.lock"), layout.lockFile)

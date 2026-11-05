@@ -41,7 +41,7 @@ class InstallDecisionTest {
     @Test
     fun `different profile reinstalls`() {
         val fixture = Fixture(installed = true)
-        val other = fixture.profile.copy(id = "debian-12")
+        val other = fixture.profile.copy(id = "other-distro")
         assertEquals(
             InstallDecision.REINSTALL,
             decideInstall(fixture.layout, other, fixture.metadata()),
@@ -140,14 +140,7 @@ class InstallDecisionTest {
             "https://example.test/rootfs.tar.gz",
             "abc123",
         ),
-        override val shell: String = "/bin/bash",
-        override val guestPath: String = "/bin",
-        override val locale: String = "C.UTF-8",
         override val requiredPaths: List<String> = emptyList(),
         override val configVersion: Int = 1,
-    ) : RootfsProfile {
-        override fun shellArguments(layout: RootfsLayout): List<String> = listOf("-i")
-        override fun initScript(): String = ""
-        override fun environment(layout: RootfsLayout): Map<String, String> = emptyMap()
-    }
+    ) : RootfsProfile
 }

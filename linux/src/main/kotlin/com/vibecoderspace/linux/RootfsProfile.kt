@@ -15,10 +15,9 @@ data class RootfsContext(
 /**
  * Describes one Linux distribution.
  *
- * Profiles hold the distro-specific parts of provisioning: the archive source,
- * the login shell, the guest PATH and locale, the init script, and any files
- * that must be written after extraction. The library only writes these into the
- * image; the host app reads them when it builds its PRoot argv.
+ * Profiles hold only the parts needed to provision a root filesystem: the
+ * archive source, the paths that must exist after extraction, and any distro
+ * files that must be written. Launching processes is the host app's job.
  */
 interface RootfsProfile {
 
@@ -29,39 +28,21 @@ interface RootfsProfile {
 
     val source: RootfsSource
 
-    /** Absolute guest path of the login shell, for example `/bin/bash`. */
-    val shell: String
-
-    /** Default guest PATH for this distribution. */
-    val guestPath: String
-
-    /** Locale exported to the guest, for example `C.UTF-8`. */
-    val locale: String
-
     /** Paths that must exist before the image is considered usable. */
     val requiredPaths: List<String>
 
     /**
      * Version of the files written by [configure].
      *
-     * Bump this when hostname, DNS, init-script, or group handling changes. An
-     * installed image with a different value is reconfigured in place without
-     * downloading the archive again.
+     * Bump this when hostname, DNS, or group handling changes. An installed
+     * image with a different value is reconfigured in place without downloading
+     * the archive again.
      */
     val configVersion: Int get() = 1
 
-    /** Arguments the host app can append to [shell] for an interactive login shell. */
-    fun shellArguments(layout: RootfsLayout): List<String>
-
-    /** Contents of the init script written to `<image>/bin/init`. */
-    fun initScript(): String
-
-    /** Guest-level environment the host app can use for this image. */
-    fun environment(layout: RootfsLayout): Map<String, String>
-
     /** Writes distro-specific files after extraction. */
     fun configure(context: RootfsContext) {
-        RootfsConfigurator.configure(context, initScript())
+        RootfsConfigurator.configure(context)
     }
 
     /** Returns true when [rootfsDir] contains the paths this profile needs. */
