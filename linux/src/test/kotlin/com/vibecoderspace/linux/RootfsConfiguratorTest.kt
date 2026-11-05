@@ -5,24 +5,24 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class RootfsFilesTest {
+class RootfsConfiguratorTest {
 
     @Test
     fun `hostname is localhost`() {
-        assertEquals("localhost\n", RootfsFiles.hostname())
+        assertEquals("localhost\n", RootfsConfigurator.hostname())
     }
 
     @Test
     fun `resolv conf lists every server`() {
         assertEquals(
             "nameserver 1.1.1.1\nnameserver 9.9.9.9\n",
-            RootfsFiles.resolvConf(listOf("1.1.1.1", "9.9.9.9")),
+            RootfsConfigurator.resolvConf(listOf("1.1.1.1", "9.9.9.9")),
         )
     }
 
     @Test
     fun `hosts maps localhost once`() {
-        val hosts = RootfsFiles.hosts()
+        val hosts = RootfsConfigurator.hosts()
 
         assertTrue(hosts.contains("127.0.0.1   localhost\n"))
         assertTrue(hosts.contains("::1         localhost"))
@@ -33,7 +33,7 @@ class RootfsFilesTest {
 
     @Test
     fun `android groups derive ids from the app gid`() {
-        val groups = RootfsFiles.androidGroupAdditions(gid = 7)
+        val groups = RootfsConfigurator.androidGroupAdditions(gid = 7)
 
         assertTrue(groups.contains("android_cache:x:10007"))
         assertTrue(groups.contains("android_storage:x:40007"))
@@ -50,7 +50,7 @@ class RootfsFilesTest {
             "android_storage:x:40007",
         )
 
-        val merged = RootfsFiles.mergeGroups(existing, additions)
+        val merged = RootfsConfigurator.mergeGroups(existing, additions)
 
         assertEquals(1, merged.split("\n").count { it == "android_cache:x:10007" })
         assertTrue(merged.contains("android_storage:x:40007"))
@@ -59,7 +59,7 @@ class RootfsFilesTest {
 
     @Test
     fun `merge groups adds a separator when the existing file has none`() {
-        val merged = RootfsFiles.mergeGroups("root:x:0:", listOf("inet:x:3003"))
+        val merged = RootfsConfigurator.mergeGroups("root:x:0:", listOf("inet:x:3003"))
 
         assertEquals("root:x:0:\ninet:x:3003\n", merged)
     }
@@ -67,7 +67,7 @@ class RootfsFilesTest {
     @Test
     fun `merge groups leaves an already complete file unchanged`() {
         val existing = "root:x:0:\ninet:x:3003\n"
-        val merged = RootfsFiles.mergeGroups(existing, listOf("inet:x:3003"))
+        val merged = RootfsConfigurator.mergeGroups(existing, listOf("inet:x:3003"))
 
         assertEquals(existing, merged)
         assertFalse(merged.contains("inet:x:3003\ninet:x:3003"))
