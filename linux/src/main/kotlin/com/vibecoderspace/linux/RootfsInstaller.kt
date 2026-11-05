@@ -16,12 +16,13 @@ import java.util.Properties
  * Downloads, extracts, and configures root filesystem images.
  *
  * Every image lives under its own directory, so Ubuntu, Debian, and future
- * distributions can coexist. A legacy single-image install from earlier
- * OpenStudio builds is adopted in place for the Ubuntu profile.
+ * distributions can coexist. A legacy single-image install from older builds
+ * is adopted in place for the Ubuntu profile.
  */
 class RootfsInstaller(
     context: Context,
     private val binaries: ProotBinaries? = null,
+    private val hostname: String = LinuxRuntimeOptions.DEFAULT_HOSTNAME,
 ) {
 
     private val appContext: Context = context.applicationContext
@@ -50,11 +51,22 @@ class RootfsInstaller(
         val layout = RootfsLayout(RootfsLayout.localDir(appContext), profile.id)
 
         if (layout.isInstalled() && profile.validate(layout.sandboxDir)) {
-            return RootfsImage(profile, layout, readInstalledAt(layout))
+            if (installedSource(layout) != profile.source.label) {
+                // The profile now points at a different archive. Keep the old
+                // image would silently pin users to a stale (or wrong) source.
+                Log.i(TAG, "Source changed for ${profile.id}; reinstalling")
+                deleteRecursively(layout.sandboxDir)
+                layout.markerFile.delete()
+            } else {
+                // Apply hostname/init-script changes without re-downloading.
+                configure(profile, layout)
+                return RootfsImage(profile, layout, readInstalledAt(layout))
+            }
         }
 
         migrateLegacy(profile, layout)
         if (layout.isInstalled() && profile.validate(layout.sandboxDir)) {
+            configure(profile, layout)
             return RootfsImage(profile, layout, readInstalledAt(layout))
         }
 
@@ -81,7 +93,7 @@ class RootfsInstaller(
             }
 
             onProgress(InstallProgress(InstallProgress.Stage.CONFIGURING, -1f))
-            profile.configure(RootfsContext(appContext, layout, profile))
+            configure(profile, layout)
             writeMetadata(layout, profile, System.currentTimeMillis())
             RootfsConfigurator.createEmptyFile(layout.markerFile)
             onProgress(InstallProgress(InstallProgress.Stage.CONFIGURING, 1f))
@@ -95,6 +107,10 @@ class RootfsInstaller(
     }
 
     // ------------------------------------------------------------------ layout
+
+    private fun configure(profile: RootfsProfile, layout: RootfsLayout) {
+        profile.configure(RootfsContext(appContext, layout, profile, hostname))
+    }
 
     private fun prepare(layout: RootfsLayout) {
         RootfsConfigurator.ensureDir(layout.imageDir)
@@ -387,6 +403,15 @@ class RootfsInstaller(
         }
         return properties.getProperty("installedAt")?.toLongOrNull()
             ?: layout.markerFile.lastModified()
+    }
+
+    /** Source label recorded at install time, or null for images without metadata. */
+    private fun installedSource(layout: RootfsLayout): String? {
+        val properties = Properties()
+        runCatching {
+            layout.metadataFile.inputStream().use { properties.load(it) }
+        }
+        return properties.getProperty("source")
     }
 
     // --------------------------------------------------------------------- utils

@@ -17,7 +17,7 @@ internal object RootfsConfigurator {
         val sandbox = context.layout.sandboxDir
         val etc = ensureDir(File(sandbox, "etc"))
 
-        writeFile(File(etc, "hostname"), "OpenStudio\n")
+        writeFile(File(etc, "hostname"), context.hostname + "\n")
         writeFile(
             File(etc, "resolv.conf"),
             "nameserver 8.8.8.8\nnameserver 8.8.4.4\nnameserver 1.1.1.1\n",
@@ -25,6 +25,7 @@ internal object RootfsConfigurator {
         writeFile(
             File(etc, "hosts"),
             "127.0.0.1   localhost.localdomain localhost\n" +
+                "127.0.1.1   " + context.hostname + "\n" +
                 "\n" +
                 "# IPv6.\n" +
                 "::1         localhost.localdomain localhost ip6-localhost ip6-loopback\n" +

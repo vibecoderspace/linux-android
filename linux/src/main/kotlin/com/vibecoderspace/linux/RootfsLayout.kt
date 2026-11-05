@@ -28,7 +28,7 @@ class RootfsLayout(
     /** `/data/data/<package>` (or `/data/user/0/<package>`). */
     val privateDir: File = localDir.parentFile ?: localDir
 
-    /** Legacy single-image location used by earlier OpenStudio builds. */
+    /** Legacy single-image location used by older builds. */
     val legacySandboxDir: File = File(localDir, "sandbox")
     val legacyHomeDir: File = File(localDir, "home")
     val legacyBinDir: File = File(localDir, "bin")

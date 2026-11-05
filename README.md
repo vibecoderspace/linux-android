@@ -17,7 +17,7 @@ and TUIs, which are out of scope for this library.
 
 ## Status
 
-`0.1.0` — usable, API may still change.
+`0.1.1` — usable, API may still change.
 
 ## Installation
 
@@ -29,7 +29,7 @@ repositories {
 }
 
 dependencies {
-    implementation("com.github.vibecoderspace:linux-android:v0.1.0")
+    implementation("com.github.vibecoderspace:linux-android:v0.1.1")
 }
 ```
 
@@ -76,7 +76,11 @@ android {
 val binaries = ProotBinaries.fromNativeLibraryDir(context)
     ?: error("PRoot binaries are missing")
 
-val runtime = LinuxRuntime.proot(context, binaries)
+val runtime = LinuxRuntime.proot(
+    context = context,
+    binaries = binaries,
+    options = LinuxRuntimeOptions(hostname = "myapp"),
+)
 
 // Install Ubuntu 24.04 on first use.
 val image = runtime.ensureInstalled(DefaultProfiles.ubuntu) { progress ->
@@ -116,11 +120,24 @@ An interactive shell is available when the host app also provides a terminal:
 val shell = runtime.launchShell(image)
 ```
 
+### Hostname
+
+The guest hostname is a runtime option, not a distro detail. It is written to
+`/etc/hostname` and `/etc/hosts` (as `127.0.1.1`) when an image is installed or
+re-configured:
+
+```kotlin
+LinuxRuntimeOptions(hostname = "myapp") // default: "localhost"
+```
+
+Existing images are re-configured in place on the next `ensureInstalled` call,
+so changing the hostname does not trigger a download.
+
 ## Profiles
 
 | Profile | ID | Shell | Source |
 |---|---|---|---|
-| `DefaultProfiles.ubuntu` | `ubuntu-24.04` | `/bin/bash` | Xed-Editor Ubuntu base image |
+| `DefaultProfiles.ubuntu` | `ubuntu-24.04` | `/bin/bash` | Ubuntu Base 24.04.4 (cdimage.ubuntu.com) |
 | `DefaultProfiles.debian` | `debian-12` | `/bin/bash` | Debian bookworm slim rootfs |
 
 A custom profile only needs to describe the distribution:
@@ -159,7 +176,9 @@ class MyProfile : RootfsProfile {
 ```
 
 A legacy single-image install at `<private>/local/sandbox` is adopted in place
-for the Ubuntu profile on first use.
+for the Ubuntu profile on first use. If a profile's archive URL changes later,
+the next `ensureInstalled` call detects the mismatch in `meta.properties` and
+reinstalls that image instead of silently keeping the stale one.
 
 ## Play Store note
 

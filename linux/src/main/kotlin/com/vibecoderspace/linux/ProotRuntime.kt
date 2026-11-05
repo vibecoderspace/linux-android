@@ -10,10 +10,11 @@ class ProotRuntime(
     context: Context,
     private val binaries: ProotBinaries,
     private val profiles: List<RootfsProfile> = DefaultProfiles.all,
+    private val options: LinuxRuntimeOptions = LinuxRuntimeOptions(),
 ) : LinuxRuntime {
 
     private val appContext: Context = context.applicationContext
-    private val installer = RootfsInstaller(appContext, binaries)
+    private val installer = RootfsInstaller(appContext, binaries, options.hostname)
     private val prootTmpDir: File = File(appContext.cacheDir, "proot-tmp").apply { mkdirs() }
 
     override fun installedImages(): List<RootfsImage> = installer.installedImages(profiles)

@@ -35,6 +35,7 @@ import com.vibecoderspace.linux.InstallProgress
 import com.vibecoderspace.linux.LinuxProcess
 import com.vibecoderspace.linux.LinuxProcessSpec
 import com.vibecoderspace.linux.LinuxRuntime
+import com.vibecoderspace.linux.LinuxRuntimeOptions
 import com.vibecoderspace.linux.ProotBinaries
 import com.vibecoderspace.linux.RootfsImage
 import kotlinx.coroutines.Dispatchers
@@ -63,7 +64,13 @@ private fun SampleScreen() {
 
     val binaries = remember { ProotBinaries.fromNativeLibraryDir(context) }
     val runtime = remember(binaries) {
-        binaries?.let { LinuxRuntime.proot(context, it) }
+        binaries?.let {
+            LinuxRuntime.proot(
+                context = context,
+                binaries = it,
+                options = LinuxRuntimeOptions(hostname = "linux"),
+            )
+        }
     }
 
     val status = remember {
@@ -213,8 +220,13 @@ private fun SampleScreen() {
 
 private fun describe(progress: InstallProgress): String = when (progress.stage) {
     InstallProgress.Stage.DOWNLOADING -> {
-        val percent = (progress.fraction * 100f).toInt().coerceIn(0, 100)
-        "Downloading $percent%"
+        if (progress.fraction < 0f) {
+            // Some mirrors (including cdimage.ubuntu.com) do not send a length.
+            "Downloading…"
+        } else {
+            val percent = (progress.fraction * 100f).toInt().coerceIn(0, 100)
+            "Downloading $percent%"
+        }
     }
 
     InstallProgress.Stage.EXTRACTING -> "Extracting"

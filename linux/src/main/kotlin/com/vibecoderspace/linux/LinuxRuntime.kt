@@ -31,6 +31,7 @@ interface LinuxRuntime {
             context: Context,
             binaries: ProotBinaries,
             profiles: List<RootfsProfile> = DefaultProfiles.all,
-        ): LinuxRuntime = ProotRuntime(context, binaries, profiles)
+            options: LinuxRuntimeOptions = LinuxRuntimeOptions(),
+        ): LinuxRuntime = ProotRuntime(context, binaries, profiles, options)
     }
 }

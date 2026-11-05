@@ -8,6 +8,7 @@ data class RootfsContext(
     val appContext: Context,
     val layout: RootfsLayout,
     val profile: RootfsProfile,
+    val hostname: String = LinuxRuntimeOptions.DEFAULT_HOSTNAME,
 )
 
 /**
