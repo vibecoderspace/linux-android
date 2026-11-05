@@ -12,18 +12,24 @@ internal object RootfsConfigurator {
 
     private const val TAG = "RootfsConfigurator"
 
+    /** Hostname written into every image. */
+    private const val HOSTNAME = "localhost"
+
+    /** DNS servers written into every image. */
+    private val DNS_SERVERS = listOf("1.1.1.1", "8.8.8.8")
+
     fun configure(context: RootfsContext) {
         val sandbox = context.layout.sandboxDir
         val etc = ensureDir(File(sandbox, "etc"))
 
-        writeFile(File(etc, "hostname"), RootfsFiles.hostname(context.hostname))
+        writeFile(File(etc, "hostname"), RootfsFiles.hostname(HOSTNAME))
         writeFile(
             File(etc, "resolv.conf"),
-            RootfsFiles.resolvConf(context.dnsServers),
+            RootfsFiles.resolvConf(DNS_SERVERS),
         )
         writeFile(
             File(etc, "hosts"),
-            RootfsFiles.hosts(context.hostname),
+            RootfsFiles.hosts(HOSTNAME),
         )
 
         appendAndroidGroups(File(etc, "group"))

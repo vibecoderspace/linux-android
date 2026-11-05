@@ -8,8 +8,6 @@ data class RootfsContext(
     val appContext: Context,
     val layout: RootfsLayout,
     val profile: RootfsProfile,
-    val hostname: String = LinuxRuntimeOptions.DEFAULT_HOSTNAME,
-    val dnsServers: List<String> = LinuxRuntimeOptions.DEFAULT_DNS_SERVERS,
 )
 
 /**
@@ -34,7 +32,7 @@ interface RootfsProfile {
     /**
      * Version of the files written by [configure].
      *
-     * Bump this when hostname, DNS, or group handling changes. An installed
+     * Bump this when the files written after extraction change. An installed
      * image with a different value is reconfigured in place without downloading
      * the archive again.
      */

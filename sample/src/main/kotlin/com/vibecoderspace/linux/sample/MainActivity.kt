@@ -33,7 +33,6 @@ import androidx.compose.ui.unit.sp
 import com.vibecoderspace.linux.DefaultProfiles
 import com.vibecoderspace.linux.InstallProgress
 import com.vibecoderspace.linux.LinuxRuntime
-import com.vibecoderspace.linux.LinuxRuntimeOptions
 import com.vibecoderspace.linux.ProotBinaries
 import com.vibecoderspace.linux.RootfsImage
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -64,7 +63,6 @@ private fun SampleScreen() {
             LinuxRuntime.proot(
                 context = context,
                 binaries = it,
-                options = LinuxRuntimeOptions(hostname = "linux"),
             )
         }
     }

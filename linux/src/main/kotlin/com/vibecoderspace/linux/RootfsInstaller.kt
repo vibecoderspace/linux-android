@@ -25,7 +25,6 @@ import java.security.MessageDigest
 class RootfsInstaller(
     context: Context,
     private val binaries: ProotBinaries? = null,
-    private val options: LinuxRuntimeOptions = LinuxRuntimeOptions(),
 ) {
 
     private val appContext: Context = context.applicationContext
@@ -175,8 +174,6 @@ class RootfsInstaller(
                 appContext = appContext,
                 layout = layout,
                 profile = profile,
-                hostname = options.hostname,
-                dnsServers = options.dnsServers,
             ),
         )
     }

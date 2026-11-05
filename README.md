@@ -81,7 +81,6 @@ val binaries = ProotBinaries.fromNativeLibraryDir(context)
 val runtime = LinuxRuntime.proot(
     context = context,
     binaries = binaries,
-    options = LinuxRuntimeOptions(hostname = "myapp"),
 )
 
 // Reuse the installed image or install Ubuntu 24.04 on first use.
@@ -108,19 +107,18 @@ PRoot argv and environment it needs, then starts the process itself.
 
 ### Hostname and DNS
 
-The guest hostname and DNS servers are runtime options, not distro details.
-They are written to `/etc/hostname`, `/etc/hosts`, and `/etc/resolv.conf` when an
-image is installed or re-configured:
+Provisioning writes fixed values into the image:
 
-```kotlin
-LinuxRuntimeOptions(
-    hostname = "myapp",                  // default: "localhost"
-    dnsServers = listOf("1.1.1.1"),      // default: 1.1.1.1, 8.8.8.8
-)
+```text
+/etc/hostname     localhost
+/etc/hosts        localhost + IPv6 entries
+/etc/resolv.conf  nameserver 1.1.1.1
+                  nameserver 8.8.8.8
 ```
 
-Existing images are re-configured in place on the next `install` call, so
-changing either option does not trigger a download.
+There are no runtime options for these. If the host app needs a different
+hostname or resolver, it can edit the files in `image.layout.sandboxDir` after
+installation.
 
 ### One image at a time
 

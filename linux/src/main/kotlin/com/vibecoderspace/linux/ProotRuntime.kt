@@ -9,10 +9,9 @@ class ProotRuntime(
     context: Context,
     binaries: ProotBinaries,
     private val profiles: List<RootfsProfile> = DefaultProfiles.all,
-    options: LinuxRuntimeOptions = LinuxRuntimeOptions(),
 ) : LinuxRuntime {
 
-    private val installer = RootfsInstaller(context.applicationContext, binaries, options)
+    private val installer = RootfsInstaller(context.applicationContext, binaries)
 
     override fun installedImage(): RootfsImage? = installer.installedImage(profiles)
 
