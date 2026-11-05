@@ -1,0 +1,18 @@
+linux-android
+Copyright 2026 vibecoderspace
+
+This product includes PRoot in the sample application and expects host
+applications to supply the same binaries at runtime.
+
+PRoot
+https://github.com/termux/proot
+Copyright (C) 2015 STMicroelectronics
+Licensed under the GNU General Public License, version 2 or later.
+
+The sample app bundles libproot.so and libloader.so from the Termux PRoot port.
+The source for PRoot is available at the URL above. The library module itself
+does not contain PRoot binaries.
+
+Root filesystem images are downloaded at runtime and are not part of this
+repository. Ubuntu is a trademark of Canonical Ltd. Debian is a trademark of
+Software in the Public Interest, Inc.
