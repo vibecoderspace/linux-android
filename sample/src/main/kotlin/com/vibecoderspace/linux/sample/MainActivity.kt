@@ -86,7 +86,7 @@ private fun SampleScreen() {
         val rt = runtime ?: return
         scope.launch {
             try {
-                val installed = rt.ensureInstalled(DefaultProfiles.ubuntu) { progress ->
+                val installed = rt.install(DefaultProfiles.ubuntu) { progress ->
                     status.value = describe(progress)
                 }
                 image = installed
@@ -97,31 +97,30 @@ private fun SampleScreen() {
         }
     }
 
-    fun repair() {
+    fun reinstall() {
         val rt = runtime ?: return
-        val current = image ?: return
         scope.launch {
             try {
-                val repaired = rt.repair(current) { progress ->
+                val reinstalled = rt.reinstall(keepHome = true) { progress ->
                     status.value = describe(progress)
                 }
-                image = repaired
-                status.value = "Repaired ${repaired.profile.displayName}"
+                image = reinstalled
+                status.value = "Reinstalled ${reinstalled.profile.displayName}"
             } catch (error: Exception) {
-                status.value = "Repair failed: ${error.message}"
+                status.value = "Reinstall failed: ${error.message}"
             }
         }
     }
 
-    fun uninstall() {
+    fun delete() {
         val rt = runtime ?: return
         scope.launch {
             try {
-                rt.uninstall(deleteHome = true)
+                rt.delete()
                 image = null
-                status.value = "Uninstalled"
+                status.value = "Deleted"
             } catch (error: Exception) {
-                status.value = "Uninstall failed: ${error.message}"
+                status.value = "Delete failed: ${error.message}"
             }
         }
     }
@@ -153,16 +152,16 @@ private fun SampleScreen() {
                 Text("Install Ubuntu")
             }
             OutlinedButton(
-                onClick = { repair() },
+                onClick = { reinstall() },
                 enabled = image != null,
             ) {
-                Text("Repair")
+                Text("Reinstall")
             }
             OutlinedButton(
-                onClick = { uninstall() },
+                onClick = { delete() },
                 enabled = image != null,
             ) {
-                Text("Uninstall")
+                Text("Delete")
             }
         }
 

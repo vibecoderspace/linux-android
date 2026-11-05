@@ -8,28 +8,27 @@ import kotlinx.coroutines.withContext
 class ProotRuntime(
     context: Context,
     binaries: ProotBinaries,
-    profiles: List<RootfsProfile> = DefaultProfiles.all,
+    private val profiles: List<RootfsProfile> = DefaultProfiles.all,
     options: LinuxRuntimeOptions = LinuxRuntimeOptions(),
 ) : LinuxRuntime {
 
     private val installer = RootfsInstaller(context.applicationContext, binaries, options)
-    private val profiles: List<RootfsProfile> = profiles
 
     override fun installedImage(): RootfsImage? = installer.installedImage(profiles)
 
-    override suspend fun ensureInstalled(
+    override suspend fun install(
         profile: RootfsProfile,
-        keepHome: Boolean,
         onProgress: (InstallProgress) -> Unit,
     ): RootfsImage = withContext(Dispatchers.IO) {
-        installer.install(profile, keepHome = keepHome, onProgress = onProgress)
+        installer.install(profile, onProgress = onProgress)
     }
 
-    override suspend fun repair(
-        image: RootfsImage,
+    override suspend fun reinstall(
         keepHome: Boolean,
         onProgress: (InstallProgress) -> Unit,
     ): RootfsImage = withContext(Dispatchers.IO) {
+        val image = installer.installedImage(profiles)
+            ?: throw IllegalStateException("No image is installed")
         installer.install(
             profile = image.profile,
             keepHome = keepHome,
@@ -38,7 +37,7 @@ class ProotRuntime(
         )
     }
 
-    override suspend fun uninstall(deleteHome: Boolean) = withContext(Dispatchers.IO) {
-        installer.uninstall(deleteHome)
+    override suspend fun delete() = withContext(Dispatchers.IO) {
+        installer.uninstall(deleteHome = true)
     }
 }

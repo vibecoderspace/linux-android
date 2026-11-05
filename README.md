@@ -13,7 +13,7 @@ and process lifecycle.
 - Replace the image when the profile or archive changes; keep user data.
 - Serialized installs, disk checks, download retries, and cached archives.
 - Metadata schema with profile, source, checksum, and config version.
-- Repair and uninstall without touching `home/` unless asked.
+- Install, reinstall, and delete without touching `home/` unless asked.
 - Distro behavior lives in a profile, not in the installer.
 - Host-supplied PRoot binaries, so the library stays Apache-2.0.
 
@@ -86,7 +86,7 @@ val runtime = LinuxRuntime.proot(
 
 // Reuse the installed image or install Ubuntu 24.04 on first use.
 val image = runtime.installedImage()
-    ?: runtime.ensureInstalled(DefaultProfiles.ubuntu) { progress ->
+    ?: runtime.install(DefaultProfiles.ubuntu) { progress ->
         // progress.stage / progress.fraction / progress.message
     }
 
@@ -123,8 +123,8 @@ LinuxRuntimeOptions(
 )
 ```
 
-Existing images are re-configured in place on the next `ensureInstalled` call,
-so changing either option does not trigger a download.
+Existing images are re-configured in place on the next `install` call, so
+changing either option does not trigger a download.
 
 ### One image at a time
 
@@ -133,25 +133,22 @@ the current one:
 
 ```kotlin
 // Ubuntu -> Debian: sandbox, init script and metadata are replaced.
-val image = runtime.ensureInstalled(DefaultProfiles.debian, keepHome = true)
+val image = runtime.install(DefaultProfiles.debian)
 ```
-
-`keepHome = true` (the default) preserves `/home` and `/root`. Pass `false` to
-reset user data as well.
 
 Recovery and removal:
 
 ```kotlin
-// Reinstall the same profile without touching home/.
-val repaired = runtime.repair(image)
+// Wipe and reinstall the current profile. keepHome defaults to true.
+val reinstalled = runtime.reinstall(keepHome = true)
 
-// Remove the image. Cached archives stay in the cache directory.
-runtime.uninstall(deleteHome = true)
+// Remove the image and its home directory. Cached archives stay.
+runtime.delete()
 ```
 
-Installation is serialized: concurrent `ensureInstalled` calls run one at a
-time. A failed install never writes the `.installed` marker, so the next call
-retries cleanly. A corrupt cached archive is deleted and downloaded again.
+Installation is serialized: concurrent `install` calls run one at a time. A
+failed install never writes the `.installed` marker, so the next call retries
+cleanly. A corrupt cached archive is deleted and downloaded again.
 
 ## Profiles
 
@@ -195,8 +192,8 @@ class MyProfile : RootfsProfile {
 ```
 
 There is no per-profile directory and no legacy location. If the profile or its
-archive URL changes, the next `ensureInstalled` call replaces `sandbox/` in
-place and leaves `home/` alone.
+archive URL changes, the next `install` call replaces `sandbox/` in place and
+leaves `home/` alone.
 
 ## Play Store note
 
